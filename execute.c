@@ -1,6 +1,6 @@
 /********************************************
 execute.c
-copyright 2008-2023,2024, Thomas E. Dickey
+copyright 2008-2024,2026, Thomas E. Dickey
 copyright 1991-1995,1996, Michael D. Brennan
 
 This is a source file for mawk, an implementation of
@@ -11,7 +11,7 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*
- * $MawkId: execute.c,v 1.64 2024/12/14 12:53:14 tom Exp $
+ * $MawkId: execute.c,v 1.71 2026/01/28 11:32:36 tom Exp $
  */
 
 #define Visible_ARRAY
@@ -36,8 +36,15 @@ the GNU General Public License, version 2, 1991.
 
 #include <math.h>
 
+#if defined(HAVE_ISNAN)
+static int compare2(CELL *, int);
+#define CompareCells(p,n) compare2(p,n)
+#else
 static int compare(CELL *);
-static UInt d_to_index(double);
+#define CompareCells(p,n) compare(p)
+#endif
+
+static int d_to_index(double);
 
 #ifdef	 NOINFO_SIGFPE
 static char dz_msg[] = "division by zero";
@@ -131,7 +138,6 @@ execute(INST * cdp,		/* code ptr, start execution here */
     /* some useful temporaries */
     CELL *cp;
     int t;
-    UInt tu;
 
     /* save state for array loops via a stack */
     ALOOP_STATE *aloop_state = (ALOOP_STATE *) 0;
@@ -292,11 +298,11 @@ execute(INST * cdp,		/* code ptr, start execution here */
 	    if (sp->type != C_DOUBLE)
 		cast1_to_d(sp);
 
-	    tu = d_to_index(sp->dval);
-	    if (tu && nf < 0)
+	    t = d_to_index(sp->dval);
+	    if (t >= 0 && nf < 0)
 		split_field0();
-	    sp->ptr = (PTR) field_ptr((int) tu);
-	    if ((int) tu > nf) {
+	    sp->ptr = (PTR) field_ptr(t);
+	    if (t > nf) {
 		/* make sure it is set to "" */
 		cp = (CELL *) sp->ptr;
 		cell_destroy(cp);
@@ -311,12 +317,12 @@ execute(INST * cdp,		/* code ptr, start execution here */
 	    if (sp->type != C_DOUBLE)
 		cast1_to_d(sp);
 
-	    tu = d_to_index(sp->dval);
+	    t = d_to_index(sp->dval);
 
 	    if (nf < 0)
 		split_field0();
-	    if ((int) tu <= nf) {
-		cellcpy(sp, field_ptr((int) tu));
+	    if (t <= nf && t >= 0) {
+		cellcpy(sp, field_ptr(t));
 	    } else {
 		sp->type = C_STRING;
 		sp->ptr = (PTR) & null_str;
@@ -466,7 +472,7 @@ execute(INST * cdp,		/* code ptr, start execution here */
 		ALOOP_STATE *ap = aloop_state;
 		if (ap != NULL && (ap->ptr < ap->limit)) {
 		    cell_destroy(ap->var);
-		    ap->var->type = C_STRING;
+		    ap->var->type = C_MBSTRN;
 		    ap->var->ptr = (PTR) * ap->ptr++;
 		    cdp += cdp->op;
 		} else {
@@ -487,7 +493,7 @@ execute(INST * cdp,		/* code ptr, start execution here */
 		    }
 		    if (ap->base < ap->limit) {
 			zfree(ap->base,
-			      ((unsigned) (ap->limit - ap->base)
+			      ((size_t) (ap->limit - ap->base)
 			       * sizeof(STRING *)));
 		    }
 		    ZFREE(ap);
@@ -892,7 +898,7 @@ execute(INST * cdp,		/* code ptr, start execution here */
 		str2 = string(sp + 1)->str;
 		len2 = string(sp + 1)->len;
 
-		b = new_STRING0(len1 + len2);
+		b = new_STRING0(SizePlus(len1, len2));
 		memcpy(b->str, str1, len1);
 		memcpy(b->str + len1, str2, len2);
 		free_STRING(string(sp));
@@ -1034,42 +1040,42 @@ execute(INST * cdp,		/* code ptr, start execution here */
 	    /*  compare() makes sure string ref counts are OK */
 	case _EQ:
 	    dec_sp();
-	    t = compare(sp);
+	    t = CompareCells(sp, 1);
 	    sp->type = C_DOUBLE;
 	    sp->dval = t == 0 ? 1.0 : 0.0;
 	    break;
 
 	case _NEQ:
 	    dec_sp();
-	    t = compare(sp);
+	    t = CompareCells(sp, 1);
 	    sp->type = C_DOUBLE;
 	    sp->dval = t ? 1.0 : 0.0;
 	    break;
 
 	case _LT:
 	    dec_sp();
-	    t = compare(sp);
+	    t = CompareCells(sp, 0);
 	    sp->type = C_DOUBLE;
 	    sp->dval = t < 0 ? 1.0 : 0.0;
 	    break;
 
 	case _LTE:
 	    dec_sp();
-	    t = compare(sp);
+	    t = CompareCells(sp, 1);
 	    sp->type = C_DOUBLE;
 	    sp->dval = t <= 0 ? 1.0 : 0.0;
 	    break;
 
 	case _GT:
 	    dec_sp();
-	    t = compare(sp);
+	    t = CompareCells(sp, 0);
 	    sp->type = C_DOUBLE;
 	    sp->dval = t > 0 ? 1.0 : 0.0;
 	    break;
 
 	case _GTE:
 	    dec_sp();
-	    t = compare(sp);
+	    t = CompareCells(sp, -1);
 	    sp->type = C_DOUBLE;
 	    sp->dval = t >= 0 ? 1.0 : 0.0;
 	    break;
@@ -1426,7 +1432,7 @@ test(CELL *cp)
    frees STRINGs at those cells
 */
 static int
-compare(CELL *cp)
+CompareCells(CELL *cp, int eq)
 {
     int result;
     size_t len;
@@ -1440,6 +1446,12 @@ compare(CELL *cp)
 
     case TWO_DOUBLES:
       two_d:
+#if defined(HAVE_ISNAN)
+	if (posix_space_flag && (isnan(cp->dval) || isnan((cp + 1)->dval))) {
+	    result = eq;
+	    break;
+	}
+#endif
 	result = ((cp->dval > (cp + 1)->dval)
 		  ? 1
 		  : ((cp->dval < (cp + 1)->dval)
@@ -1565,13 +1577,13 @@ DB_cell_destroy(CELL *cp)
  * Note: this used to return (unsigned) d_to_I(d), but is done inline to
  * aid static analysis.
  */
-static UInt
+static int
 d_to_index(double d)
 {
-    if (d >= (double) Max_Int) {
-	return (UInt) Max_Int;
+    if (d >= (double) MAX_INTEGER) {
+	return MAX_INTEGER;
     } else if (d >= 0.0) {
-	return (UInt) (Int) (d);
+	return (int) (d);
     } else {
 	/* might include nan */
 	rt_error("negative field index $%.6g", d);

@@ -1,7 +1,7 @@
 #!/bin/sh
-# $MawkId: mawktest,v 1.54 2024/11/11 23:40:27 tom Exp $
+# $MawkId: mawktest,v 1.60 2026/01/30 01:22:58 tom Exp $
 ###############################################################################
-# copyright 2008-2023,2024, Thomas E. Dickey
+# copyright 2008-2024,2026, Thomas E. Dickey
 # copyright 2010, Guido Berhoerster
 # copyright 2010, Jonathan Nieder
 # copyright 2005, Aleksey Cheusov
@@ -267,6 +267,26 @@ Finish "character-classes demo"
 Begin "long-lines test"
 AWK=$PROG ./longline.sh | cmp -s - longline.out || Fail "longline.awk"
 Finish "long-lines test"
+
+#################################
+
+#################################
+
+not_a_sign() {
+	sed -e 's/[-+][Ii]nf/inf/g' -e 's/[-+][Nn]a[Nn]/nan/g' nan-$1.out >$MYTEMP/ref.log
+	sed -e 's/[-+][Ii]nf/inf/g' -e 's/[-+][Nn]a[Nn]/nan/g' $MYTEMP/result >$MYTEMP/cmp.log
+	if cmp -s $MYTEMP/ref.log $MYTEMP/cmp.log
+	then
+		echo "? different signs of Inf/NaN in $1 test"
+	else
+		Fail "nan.awk ($1)"
+	fi
+}
+
+Begin "not-a-number demo"
+LC_ALL=C $PROG --posix -f nan.awk | tee $MYTEMP/result | cmp -s - nan-posix.out  || not_a_sign "posix"
+LC_ALL=C $PROG         -f nan.awk | tee $MYTEMP/result | cmp -s - nan-legacy.out || not_a_sign "legacy"
+Finish "not-a-number demo"
 
 #################################
 

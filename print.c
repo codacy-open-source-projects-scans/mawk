@@ -1,7 +1,7 @@
 /********************************************
 print.c
-copyright 2008-2023,2024.  Thomas E. Dickey
-copyright 1991-1996,2014.  Michael D. Brennan
+copyright 2008-2024,2026  Thomas E. Dickey
+copyright 1991-1996,2014  Michael D. Brennan
 
 This is a source file for mawk, an implementation of
 the AWK programming language.
@@ -11,7 +11,7 @@ the GNU General Public License, version 2, 1991.
 ********************************************/
 
 /*
- * $MawkId: print.c,v 1.55 2024/12/10 01:13:31 tom Exp $
+ * $MawkId: print.c,v 1.57 2026/01/29 23:28:43 tom Exp $
  */
 
 #define Visible_BI_REC
@@ -48,6 +48,17 @@ the GNU General Public License, version 2, 1991.
 #else
 #define MY_FMT	p		/* p -> format */
 #endif
+
+typedef enum {
+    PF_C = 0,			/* %c */
+    PF_S,			/* %s */
+    PF_D,			/* int conversion */
+    PF_F,			/* float conversion */
+    PF_U,			/* unsigned conversion */
+    PF_last
+} PF_enum;
+
+static int type_of_OFMT(void);
 
 /* this can be moved and enlarged  by -W sprintf=num  */
 char *sprintf_buff = string_buff;
@@ -111,10 +122,24 @@ print_cell(CELL *p, FILE *fp)
 	    Long ival = d_to_L(p->dval);
 
 	    /* integers print as "%[l]d" */
-	    if ((double) ival == p->dval && (p->dval != (double) Max_Long))
+	    if ((double) ival == p->dval && (p->dval != (double) Max_Long)) {
 		fprintf(fp, LONG_FMT, ival);
-	    else
-		fprintf(fp, string(OFMT)->str, p->dval);
+	    } else {
+		const char *format = string(OFMT)->str;
+		switch (type_of_OFMT()) {
+		case PF_F:
+		case PF_D:
+		    fprintf(fp, format, p->dval);
+		    break;
+		case PF_C:
+		case PF_S:
+		    rt_error("illegal format assigned to OFMT: %s", format);
+		    break;
+		default:
+		    fprintf(fp, format, (Long) p->dval);
+		    break;
+		}
+	    }
 	}
 	break;
 
@@ -179,15 +204,6 @@ bi_print(CELL *sp)		/* stack ptr passed in */
 }
 
 /*---------- types and defs for doing printf and sprintf----*/
-typedef enum {
-    PF_C = 0,			/* %c */
-    PF_S,			/* %s */
-    PF_D,			/* int conversion */
-    PF_F,			/* float conversion */
-    PF_U,			/* unsigned conversion */
-    PF_last
-} PF_enum;
-
 /* for switch on number of '*' and type */
 #define	 AST(num,type)	((PF_last)*(num)+(type))
 
